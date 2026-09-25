@@ -1081,7 +1081,10 @@ class TestWiUpdate:
     @patch("planecli.commands.work_items.resolve_estimate_point_async", new_callable=AsyncMock)
     @patch("planecli.commands.work_items.get_workspace", return_value="test-ws")
     @patch("planecli.commands.work_items.get_client")
-    @patch("planecli.commands.work_items.resolve_work_item_across_projects_async", new_callable=AsyncMock)
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
     @patch("planecli.cache.invalidate_resource", new_callable=AsyncMock)
     async def test_update_with_estimate(
         self,
@@ -1119,7 +1122,10 @@ class TestWiUpdate:
     @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
     @patch("planecli.commands.work_items.get_workspace", return_value="test-ws")
     @patch("planecli.commands.work_items.get_client")
-    @patch("planecli.commands.work_items.resolve_work_item_across_projects_async", new_callable=AsyncMock)
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
     @patch("planecli.cache.invalidate_resource", new_callable=AsyncMock)
     async def test_update_without_estimate(
         self,
