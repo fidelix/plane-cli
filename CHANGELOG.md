@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+## [0.5.2] - 2026-09-25
+
+### Changed
+- Fork release containing the integrated upstream work-item, comment, attachment, document, and project improvements.
+
+### Added
 - `planecli intake` command group: `ls`, `create`, `accept`, `decline`, `delete`, `enabled` for project intake queues. Mutations take the work item UUID shown in the `Issue ID` column of `intake ls`. `accept`/`decline` require the project Admin role (the API silently ignores the change for lower roles, so the CLI verifies it and fails loudly). `delete` also permanently deletes the underlying work item for any status other than `accepted`
 
 ### Fixed
