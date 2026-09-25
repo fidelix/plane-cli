@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from plane.errors import PlaneError
 
-from planecli.commands.comments import _enrich_comment
+from planecli.commands.comments import _body_to_html, _enrich_comment
 
 
 def test_body_to_html_converts_inline_backticks_to_code():
