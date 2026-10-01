@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+
+## [0.6.0] - 2026-10-01
+
+### Added
 - Work item relations: `wi update --blocked-by REF` (repeatable) adds "blocked by" relations and `--unblocked-by REF` removes them; `wi create` accepts `--blocked-by` too. References take a UUID, identifier (`ABC-123`), or name. Writes are verified by re-reading the relations, so a silently ignored change fails loudly instead of reporting success. `wi show` displays `Blocked by`/`Blocking` sections (and `blocked_by`/`blocking` fields in `--json`), with `--no-relations` to skip the fetch
 - Work item attachments: an `attachment` command group (`attach`/`upload`/`new`, `ls`) backed by a three-step upload flow (register for a presigned S3 URL, PUT the binary, PATCH `is_uploaded` and verify the write). Duplicate asset names are rejected unless `--force` is given
 - `wi create`/`wi update` gain repeatable `-i/--image` flags that upload an image as an attachment and append it to the description HTML
