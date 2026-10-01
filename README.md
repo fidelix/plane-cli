@@ -13,6 +13,7 @@ The main differentiator is **intelligent fuzzy search**: reference any resource 
 - **Labels**: Create and manage project labels with custom colors
 - **States**: Configure workflow states per project
 - **Documents**: Create, read, update, and delete project documents
+- **Attachments**: Upload file attachments to work items and embed images inline in descriptions
 - **Intake**: Manage a project's intake queue — list, create, triage (accept/decline), and delete items
 - **Comments**: Add, update, and delete comments on work items
 - **Users**: List workspace members and identify the authenticated user
@@ -100,6 +101,10 @@ planecli wi create "Review PR #345" --parent ABC-234 --assign "Luiz" --state "In
 
 # Update a work item
 planecli wi update ABC-123 --state "Done" --priority none
+
+# Embed images inline in the description (uploaded as attachments)
+planecli wi create "Design review" -p "Frontend" -i ./mockup.png
+planecli wi update ABC-123 -i ./diagram.png --force
 
 # Quick-assign a work item (defaults to yourself)
 planecli wi assign ABC-123
@@ -245,6 +250,22 @@ planecli intake delete  <issue-uuid> -p Frontend
 planecli intake enabled Frontend --json
 ```
 
+### Attachments
+
+```bash
+# Upload a file attachment to a work item (aliases: attach, upload, new)
+planecli attachment attach ABC-123 -f ./spec.pdf
+
+# List a work item's attachments
+planecli attachment ls ABC-123
+
+# Duplicate file names are rejected unless --force is given (the CLI asks first)
+planecli attachment attach ABC-123 -f ./spec.pdf --force
+```
+
+`wi create` / `wi update` accept repeatable `-i/--image PATH` flags that upload the
+image as an attachment and append it to the work item's description HTML.
+
 ### Comments
 
 ```bash
@@ -289,6 +310,8 @@ planecli --no-cache wi ls -p "Frontend"
 | `planecli project` | `projects` |
 | `planecli comment` | `comments` |
 | `planecli document` | `documents`, `doc`, `docs` |
+| `planecli attachment` | `attachments` |
+| Subcommand `attach` | `upload`, `new` |
 | `planecli users` | `user` |
 | `planecli module` | `modules` |
 | `planecli label` | `labels` |
@@ -457,6 +480,7 @@ src/planecli/
         client.py        # PlaneClient singleton wrapper
         async_sdk.py     # Async wrapper with rate limiter
     commands/
+        attachments.py   # Attachment upload/list + inline description images
         cache_cmd.py     # Cache management
         comments.py      # Comment CRUD
         cycles.py        # Cycle CRUD + item management

@@ -10,6 +10,7 @@
 - [States](#states)
 - [Documents](#documents)
 - [Comments](#comments)
+- [Attachments](#attachments)
 - [Intake](#intake)
 - [Users](#users)
 - [Cache](#cache)
@@ -104,6 +105,10 @@ planecli wi create TITLE [OPTIONS]
 | `--parent` | Parent work item identifier (ABC-123) for sub-issues |
 | `--estimate` / `-e` | Story point estimate |
 | `--description` / `-d` | Description. Stored as raw HTML, not markdown — see the Gotchas in SKILL.md |
+| `--image` / `-i` | Image file path to embed in the description (repeatable); uploaded as an attachment |
+| `--force` | Upload images even when an attachment with the same file name exists |
+| `--start-date` | Start date (YYYY-MM-DD); defaults to the creation date |
+| `--target-date` | Target end date (YYYY-MM-DD) |
 | `--json` | JSON output |
 
 ### wi update
@@ -123,6 +128,10 @@ planecli wi update ISSUE [OPTIONS]
 | `--clear-labels` | Remove all labels |
 | `--name` | New title |
 | `--description` / `-d` | New description. Stored as raw HTML, not markdown |
+| `--image` / `-i` | Image file path to embed in the description (repeatable); appended to the existing description |
+| `--force` | Upload images even when an attachment with the same file name exists |
+| `--start-date` | New start date (YYYY-MM-DD) |
+| `--target-date` | New target end date (YYYY-MM-DD) |
 | `--json` | JSON output |
 
 ### wi delete
@@ -295,6 +304,27 @@ planecli comment delete COMMENT_ID --issue ISSUE [--project/-p PROJECT]
 oldest → newest — not the first N chronologically. A limit of `0` or a negative
 value returns no comments (consistent with the `[:limit]` semantics used elsewhere,
 where `0` means "none").
+
+## Attachments
+
+Command group: `planecli attachment` (alias: `attachments`)
+
+```
+planecli attachment attach ISSUE --file/-f PATH [--project/-p PROJECT] [--force] [--json]
+planecli attachment ls ISSUE [--project/-p PROJECT] [--json]
+```
+
+| Parameter | Description |
+|---|---|
+| `ISSUE` | Work item identifier (`ABC-123`) or UUID |
+| `--file` / `-f` | Path of the file to upload (subcommands: `attach`, aliases `upload` / `new`) |
+| `--force` | Upload even when an attachment with the same file name already exists (otherwise the CLI asks first) |
+| `--project` / `-p` | Project name/ID (required for name-based lookup) |
+
+Images can also be embedded inline in a work item description with the repeatable
+`wi create` / `wi update` flag `--image/-i PATH`: the image is uploaded as an
+attachment and an img tag referencing its asset UUID is appended to the
+description HTML.
 
 ## Intake
 

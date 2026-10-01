@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Work item attachments: an `attachment` command group (`attach`/`upload`/`new`, `ls`) backed by a three-step upload flow (register for a presigned S3 URL, PUT the binary, PATCH `is_uploaded` and verify the write). Duplicate asset names are rejected unless `--force` is given
+- `wi create`/`wi update` gain repeatable `-i/--image` flags that upload an image as an attachment and append it to the description HTML
 - Several workspaces: optional `[name]` sections in `~/.plane_api` (slug, and optionally their own API key and base URL), a global `--workspace`/`-w NAME` flag that selects a section or any slug for one command, and `planecli workspaces` to list them without secrets. The existing file format keeps working unchanged
 
 ## [0.5.2] - 2026-09-25
