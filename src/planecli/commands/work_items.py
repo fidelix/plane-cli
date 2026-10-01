@@ -59,6 +59,12 @@ WI_FIELDS = [
 ]
 
 
+RELATION_COLUMNS = [
+    ("identifier", "ID"),
+    ("name", "Title"),
+]
+
+
 def _enrich_work_item(
     data: dict,
     *,
@@ -234,6 +240,202 @@ async def _fetch_project_data(
         cached_list_labels(workspace, project_id),
     )
     return items, states, labels
+
+
+async def fetch_issue_relations(
+    workspace: str, project_id: str, item_id: str
+) -> dict[str, list[dict]]:
+    """Fetch and enrich a work item's blocked_by/blocking relations.
+
+    Single source of truth shared by `wi show` (and the relation write
+    path for display labels). Related UUIDs resolve to identifier/name via
+    the (already 2m-cached) project work items list.
+
+    Returns {"blocked_by": [...], "blocking": [...]} where each entry is
+    {"id", "identifier" (or None), "name"}. Unknown UUIDs degrade to a
+    truncated-UUID name instead of losing the relation.
+
+    Always raises on failure — callers own the failure policy.
+    """
+    from plane.errors import PlaneError
+
+    from planecli.cache import (
+        cached_get_relations,
+        cached_list_projects,
+        cached_list_work_items,
+    )
+    from planecli.exceptions import PlaneCLIError
+
+    relations = await cached_get_relations(workspace, project_id, item_id)
+
+    # Name resolution is a nicety, not the point of this call: if the
+    # project lists fail to load, fall back to empty maps (entries then
+    # degrade to truncated UUIDs) instead of losing the relations.
+    try:
+        items, projects = await asyncio.gather(
+            cached_list_work_items(workspace, project_id),
+            cached_list_projects(workspace),
+        )
+    except (PlaneError, PlaneCLIError):
+        items, projects = [], []
+    item_map = {i["id"]: i for i in items if i.get("id")}
+    project_identifier = next(
+        (p.get("identifier", "") for p in projects if p.get("id") == project_id),
+        "",
+    )
+
+    def _enrich(ids: list[str] | None) -> list[dict]:
+        rows = []
+        for uid in ids or []:
+            info = item_map.get(uid, {})
+            name = info.get("name") or uid[:8]
+            seq = info.get("sequence_id")
+            identifier = (
+                f"{project_identifier}-{seq}"
+                if project_identifier and seq
+                else None
+            )
+            rows.append({"id": uid, "identifier": identifier, "name": name})
+        return rows
+
+    return {
+        "blocked_by": _enrich(relations.get("blocked_by")),
+        "blocking": _enrich(relations.get("blocking")),
+    }
+
+
+async def _apply_block_relations(
+    *,
+    client,
+    workspace: str,
+    project_id: str,
+    item_id: str,
+    blocked_by: list[str] | None,
+    unblocked_by: list[str] | None,
+    project_flag: str | None,
+) -> dict[str, list[str]]:
+    """Add/remove "blocked by" relations on a work item.
+
+    Each reference is a work item UUID, identifier (ABC-123), or name
+    (names need --project, like the issue argument). Related items must
+    live in the same project — the relations endpoint is project-scoped.
+    Adds are idempotent; removals only touch relations that exist.
+
+    Writes are verified by re-reading the relations (ADR-0007): a silent
+    no-op from the API raises APIError instead of reporting success.
+
+    Returns {"added": [...], "removed": [...]} with the display labels used.
+    """
+    from plane.errors import PlaneError
+    from plane.models.work_items import CreateWorkItemRelation, RemoveWorkItemRelation
+
+    from planecli.cache import cached_get_relations, invalidate_resource
+    from planecli.exceptions import APIError, ValidationError
+
+    async def _resolve_ids(refs: list[str] | None) -> list[tuple[str, str]]:
+        resolved: list[tuple[str, str]] = []
+        for ref in refs or []:
+            label = ref.strip() if isinstance(ref, str) else ""
+            if not label:
+                raise ValidationError(
+                    "Empty work item reference in a relation flag.",
+                    hint="Pass a name, identifier (ABC-123), or UUID per flag.",
+                )
+            if project_flag:
+                blocker = await resolve_work_item_async(
+                    label, client, workspace, project_id
+                )
+                blocker_project = blocker.get("project") or project_id
+            else:
+                blocker, blocker_project = (
+                    await resolve_work_item_across_projects_async(
+                        label, client, workspace
+                    )
+                )
+            if blocker_project != project_id:
+                raise ValidationError(
+                    f"Relation target {label!r} is in another project.",
+                    hint="Relations only link work items of the same project.",
+                )
+            if blocker["id"] == item_id:
+                raise ValidationError(
+                    "A work item cannot block itself.",
+                    hint=f"Remove {label!r} from the relation flags.",
+                )
+            if blocker["id"] not in [rid for rid, _ in resolved]:
+                resolved.append((blocker["id"], label))
+        return resolved
+
+    try:
+        to_add = await _resolve_ids(blocked_by)
+        to_remove = await _resolve_ids(unblocked_by)
+    except PlaneError as e:
+        raise handle_api_error(e)
+
+    overlap = {rid for rid, _ in to_add} & {rid for rid, _ in to_remove}
+    if overlap:
+        raise ValidationError(
+            "A work item cannot be both added and removed in one command.",
+            hint="Drop it from either --blocked-by or --unblocked-by.",
+        )
+
+    current = await cached_get_relations(workspace, project_id, item_id)
+    existing = set(current.get("blocked_by") or [])
+    add_ids = [(rid, label) for rid, label in to_add if rid not in existing]
+    remove_ids = [(rid, label) for rid, label in to_remove if rid in existing]
+
+    if add_ids:
+        await run_sdk(
+            client.work_items.relations.create,
+            workspace,
+            project_id,
+            item_id,
+            CreateWorkItemRelation(
+                relation_type="blocked_by", issues=[rid for rid, _ in add_ids]
+            ),
+        )
+    for rid, _ in remove_ids:
+        await run_sdk(
+            client.work_items.relations.delete,
+            workspace,
+            project_id,
+            item_id,
+            RemoveWorkItemRelation(related_issue=rid),
+        )
+
+    if add_ids or remove_ids:
+        await invalidate_resource("relations", workspace, project_id, item_id)
+        verified = await cached_get_relations(workspace, project_id, item_id)
+        now = set(verified.get("blocked_by") or [])
+        missing = [label for rid, label in add_ids if rid not in now]
+        lingering = [label for rid, label in remove_ids if rid in now]
+        if missing or lingering:
+            problems = []
+            if missing:
+                problems.append(f"not added: {', '.join(missing)}")
+            if lingering:
+                problems.append(f"not removed: {', '.join(lingering)}")
+            raise APIError(
+                "The server did not apply the relation change "
+                f"({'; '.join(problems)})."
+            )
+
+    from planecli.formatters import console
+
+    if add_ids:
+        console.print(
+            f"[green]Blocked by {', '.join(label for _, label in add_ids)}.[/]"
+        )
+    if remove_ids:
+        console.print(
+            "[green]No longer blocked by "
+            f"{', '.join(label for _, label in remove_ids)}.[/]"
+        )
+
+    return {
+        "added": [label for _, label in add_ids],
+        "removed": [label for _, label in remove_ids],
+    }
 
 
 @wi_app.command(name="list", alias="ls")
@@ -431,6 +633,7 @@ async def show(
     project: Annotated[str | None, Parameter(alias="-p")] = None,
     json: bool = False,
     no_comments: bool = False,
+    no_relations: bool = False,
 ) -> None:
     """Show work item details.
 
@@ -442,6 +645,8 @@ async def show(
         Project name/ID (required for name-based lookup).
     no_comments
         Skip fetching the work item's comments.
+    no_relations
+        Skip fetching the work item's blocked-by/blocking relations.
     """
     try:
         client = get_client()
@@ -532,6 +737,21 @@ async def show(
             logger.warning("Failed to fetch comments: {}", exc)
             data["comments"] = None  # signal failure, do NOT abort
 
+    # Relations are a SECONDARY enrichment too: same degrade-to-null policy.
+    if not no_relations and data.get("id") and data.get("project"):
+        from planecli.exceptions import PlaneCLIError
+
+        try:
+            relations = await fetch_issue_relations(
+                workspace, data["project"], data["id"]
+            )
+            data["blocked_by"] = relations["blocked_by"]
+            data["blocking"] = relations["blocking"]
+        except (PlaneError, PlaneCLIError) as exc:
+            logger.warning("Failed to fetch relations: {}", exc)
+            data["blocked_by"] = None  # signal failure, do NOT abort
+            data["blocking"] = None
+
     output_single(data, WI_FIELDS, title="Work Item Details", as_json=json)
 
     # Human-readable Comments section (non-JSON only, so stdout stays clean under --json).
@@ -548,6 +768,19 @@ async def show(
             console.print("Comments: (none)")
         else:  # None -> fetch failed
             console.print("Comments: (failed to load)")
+
+    # Human-readable relations sections, same gating and policy as comments.
+    if not json and not no_relations and data.get("id") and data.get("project"):
+        from planecli.formatters import console
+
+        for key, title in (("blocked_by", "Blocked by"), ("blocking", "Blocking")):
+            rows = data.get(key)
+            if rows:
+                output(rows, RELATION_COLUMNS, title=title)
+            elif rows == []:
+                console.print(f"{title}: (none)")
+            else:  # None -> fetch failed
+                console.print(f"{title}: (failed to load)")
 
 
 @wi_app.command(alias="new")
@@ -567,6 +800,7 @@ async def create(
     force: bool = False,
     start_date: str | None = None,
     target_date: str | None = None,
+    blocked_by: list[str] | None = None,
     json: bool = False,
 ) -> None:
     """Create a new work item.
@@ -602,6 +836,9 @@ async def create(
         Start date (YYYY-MM-DD). Defaults to the creation date when omitted.
     target_date
         Target end date (YYYY-MM-DD).
+    blocked_by
+        Work item that blocks the new one, by identifier (ABC-123), UUID, or
+        name (repeatable, one per flag). Relations are added after creation.
     """
     from plane.models.work_items import CreateWorkItem
 
@@ -722,6 +959,19 @@ async def create(
             data["description_html"] = "".join(parts)
             data = _enrich_work_item(data)
 
+        # Relations are added after the item exists and verified by
+        # re-reading them (ADR-0007).
+        if blocked_by:
+            await _apply_block_relations(
+                client=client,
+                workspace=workspace,
+                project_id=project_id,
+                item_id=data["id"],
+                blocked_by=blocked_by,
+                unblocked_by=None,
+                project_flag=project,
+            )
+
     except PlaneError as e:
         raise handle_api_error(e)
 
@@ -745,6 +995,8 @@ async def update(
     force: bool = False,
     start_date: str | None = None,
     target_date: str | None = None,
+    blocked_by: list[str] | None = None,
+    unblocked_by: list[str] | None = None,
     json: bool = False,
 ) -> None:
     """Update a work item.
@@ -781,6 +1033,12 @@ async def update(
         New start date (YYYY-MM-DD).
     target_date
         New target end date (YYYY-MM-DD).
+    blocked_by
+        Work item that now blocks this one, by identifier (ABC-123), UUID, or
+        name (repeatable, one per flag). Adds relations, never removes them.
+    unblocked_by
+        Work item that no longer blocks this one (repeatable, one per flag).
+        Only removes existing blocked-by relations; never prompts.
     """
     from plane.models.work_items import UpdateWorkItem
 
@@ -895,6 +1153,20 @@ async def update(
                 raise APIError(
                     f"The server did not apply {flag}: asked {asked!r}, got {got!r}."
                 )
+
+        # Relations are applied after the field update and verified by
+        # re-reading them (ADR-0007); _apply_block_relations raises APIError
+        # when the server silently ignores the change.
+        if blocked_by or unblocked_by:
+            await _apply_block_relations(
+                client=client,
+                workspace=workspace,
+                project_id=project_id,
+                item_id=item_id,
+                blocked_by=blocked_by,
+                unblocked_by=unblocked_by,
+                project_flag=project,
+            )
 
         # Invalidate work items cache for this project
         from planecli.cache import invalidate_resource

@@ -102,6 +102,11 @@ planecli wi create "Review PR #345" --parent ABC-234 --assign "Luiz" --state "In
 # Update a work item
 planecli wi update ABC-123 --state "Done" --priority none
 
+# Blocked-by relations (repeatable, one reference per flag)
+planecli wi update ABC-123 --blocked-by ABC-100 --blocked-by "Fix login"
+planecli wi update ABC-123 --unblocked-by ABC-100
+planecli wi show ABC-123   # includes Blocked by / Blocking sections
+
 # Embed images inline in the description (uploaded as attachments)
 planecli wi create "Design review" -p "Frontend" -i ./mockup.png
 planecli wi update ABC-123 -i ./diagram.png --force

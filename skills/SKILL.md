@@ -51,10 +51,12 @@ planecli wi create "Title" -p "Project" -d "<p>Body.</p>" --json   # -d is HTML 
 # Update
 planecli wi update ABC-123 --state "Done" --priority none --json
 planecli wi update ABC-123 --assign "Patrick" --labels "bug,urgent" --json
+planecli wi update ABC-123 --blocked-by ABC-100 --blocked-by "Fix login" --json  # repeatable
+planecli wi update ABC-123 --unblocked-by ABC-100 --json   # removes the relation, no prompt
 
 # Other
-planecli wi show ABC-123 --json                     # bundles comments (see Gotchas)
-planecli wi show ABC-123 --no-comments --json       # skip the comment fetch
+planecli wi show ABC-123 --json                     # bundles comments + relations (see Gotchas)
+planecli wi show ABC-123 --no-comments --no-relations --json
 planecli wi assign ABC-123 --json                   # assign to yourself
 planecli wi assign ABC-123 --assign "Name" --json
 planecli wi search "login bug" -p "Project" --json
@@ -155,7 +157,9 @@ planecli attachment ls ABC-123 --json
 - **`wi show` bundles comments and can degrade to `comments: null`.** `[]` = none, a list = some,
   `null` = the comment fetch failed while the work item still returned and the command exited 0.
   Check for `null` explicitly when "no comments" and "couldn't load comments" differ for you.
-  `--no-comments` omits the key entirely.
+  `--no-comments` omits the key entirely. Same policy for relations: `blocked_by` / `blocking`
+  are lists of `{id, identifier, name}` (unknown UUIDs degrade to a truncated-UUID name),
+  `null` on fetch failure, omitted with `--no-relations`.
 
 ## Bulk create with rich descriptions
 

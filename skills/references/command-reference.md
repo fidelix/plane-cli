@@ -77,6 +77,7 @@ planecli wi show ISSUE [OPTIONS]
 | `ISSUE` | Work item identifier (ABC-123), UUID, or name (required) |
 | `--project` / `-p` | Project (required for name-based lookup) |
 | `--no-comments` | Skip fetching the work item's comments |
+| `--no-relations` | Skip fetching the work item's blocked-by/blocking relations |
 | `--json` | JSON output |
 
 Bundles the work item's comments in the same call (chronological, oldest → newest;
@@ -86,6 +87,11 @@ itself still returns and the command still exits 0. In human output, a `Comments
 section follows the work item details, showing `(none)` or `(failed to load)` as
 appropriate. Pass `--no-comments` to skip the fetch entirely (the `comments` key is
 then omitted from JSON output).
+
+Also bundles the work item's relations: `Blocked by` and `Blocking` sections in
+human output, `blocked_by` / `blocking` lists of `{id, identifier, name}` in
+`--json` (unknown UUIDs degrade to a truncated-UUID name; `null` on fetch failure).
+Pass `--no-relations` to skip the fetch entirely.
 
 ### wi create
 
@@ -107,6 +113,7 @@ planecli wi create TITLE [OPTIONS]
 | `--description` / `-d` | Description. Stored as raw HTML, not markdown — see the Gotchas in SKILL.md |
 | `--image` / `-i` | Image file path to embed in the description (repeatable); uploaded as an attachment |
 | `--force` | Upload images even when an attachment with the same file name exists |
+| `--blocked-by` | Work item that blocks the new one, by identifier, UUID, or name (repeatable) |
 | `--start-date` | Start date (YYYY-MM-DD); defaults to the creation date |
 | `--target-date` | Target end date (YYYY-MM-DD) |
 | `--json` | JSON output |
@@ -130,6 +137,8 @@ planecli wi update ISSUE [OPTIONS]
 | `--description` / `-d` | New description. Stored as raw HTML, not markdown |
 | `--image` / `-i` | Image file path to embed in the description (repeatable); appended to the existing description |
 | `--force` | Upload images even when an attachment with the same file name exists |
+| `--blocked-by` | Work item that now blocks this one, by identifier, UUID, or name (repeatable; additive only) |
+| `--unblocked-by` | Work item that no longer blocks this one (repeatable; removes the relation, no prompt) |
 | `--start-date` | New start date (YYYY-MM-DD) |
 | `--target-date` | New target end date (YYYY-MM-DD) |
 | `--json` | JSON output |

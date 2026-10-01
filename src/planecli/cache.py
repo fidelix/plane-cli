@@ -19,6 +19,7 @@ TTL_CONFIG = "10m"  # states, labels
 TTL_MODERATE = "5m"  # projects, modules, cycles
 TTL_WORK_ITEMS = "2m"  # work items: short TTL to avoid stale data
 TTL_COMMENTS = "1m"  # comments are volatile; short TTL bounds staleness
+TTL_RELATIONS = "1m"  # relations are volatile; short TTL bounds staleness
 
 # Module-level flag for --no-cache behavior
 _no_cache = False
@@ -253,6 +254,44 @@ async def cached_list_comments(
         )
 
     return await _cached_list(key, TTL_COMMENTS, _fetch)
+
+
+async def cached_get_relations(
+    workspace: str, project_id: str, item_id: str
+) -> dict[str, Any]:
+    """Fetch a work item's relations with short-lived caching (TTL: 1m).
+
+    Keyed per work item so different items never collide. Returns the
+    relation response as a plain dict (blocked_by, blocking, ... each a
+    list of work item UUIDs).
+    """
+    from planecli.api.async_sdk import create_client, run_sdk
+
+    key = _cache_key("relations", workspace, project_id, item_id=item_id)
+
+    if not _no_cache:
+        try:
+            cached = await cache.get(key)
+            if cached is not None:
+                return cached
+        except Exception as exc:
+            logger.warning("Cache read error, fetching from API: {}", exc)
+
+    async def _fetch() -> dict[str, Any]:
+        client = create_client()
+        result = await run_sdk(
+            client.work_items.relations.list, workspace, project_id, item_id
+        )
+        return result.model_dump() if hasattr(result, "model_dump") else result
+
+    data = await _fetch()
+
+    try:
+        await cache.set(key, data, expire=TTL_RELATIONS)
+    except Exception as exc:
+        logger.warning("Cache write error: {}", exc)
+
+    return data
 
 
 async def cached_get_me(workspace: str) -> dict[str, Any]:

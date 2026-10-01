@@ -9,6 +9,7 @@ from planecli.cache import (
     _cached_list,
     cache,
     cached_get_me,
+    cached_get_relations,
     cached_list_comments,
     cached_list_cycles,
     cached_list_labels,
@@ -259,8 +260,29 @@ async def test_cached_get_me(mock_run_sdk, mock_create_client, mock_hash):
     assert mock_run_sdk.call_count == 1  # only called once
 
 
-# --- Tests for invalidation ---
+@patch("planecli.cache._url_hash", return_value="abc123")
+@patch("planecli.api.async_sdk.create_client")
+@patch("planecli.api.async_sdk.run_sdk", new_callable=AsyncMock)
+async def test_cached_get_relations(mock_run_sdk, mock_create_client, mock_hash):
+    payload = {"blocked_by": ["wi-1"], "blocking": [], "duplicate": []}
+    mock_run_sdk.return_value = _make_model(payload)
 
+    result = await cached_get_relations("my-ws", "proj-1", "item-1")
+    assert result["blocked_by"] == ["wi-1"]
+
+    # Second call should hit cache
+    result2 = await cached_get_relations("my-ws", "proj-1", "item-1")
+    assert result2 == result
+    assert mock_run_sdk.call_count == 1  # only called once
+
+    # Invalidation drops the per-item entry
+    await invalidate_resource("relations", "my-ws", "proj-1", "item-1")
+    result3 = await cached_get_relations("my-ws", "proj-1", "item-1")
+    assert result3 == result
+    assert mock_run_sdk.call_count == 2
+
+
+# --- Tests for invalidation ---
 
 @patch("planecli.cache._url_hash", return_value="abc123")
 async def test_invalidate_resource(mock_hash):

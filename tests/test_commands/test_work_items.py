@@ -1191,6 +1191,16 @@ class TestWiFields:
 class TestWiShow:
     """Tests for the wi show command (with bundled comments)."""
 
+    @pytest.fixture(autouse=True)
+    def _mock_relations_fetch(self):
+        """Keep relation enrichment hermetic: show tests predate it."""
+        with patch(
+            "planecli.commands.work_items.fetch_issue_relations",
+            new_callable=AsyncMock,
+        ) as m:
+            m.return_value = {"blocked_by": [], "blocking": []}
+            yield m
+
     def _resolved_item(self):
         return {
             "id": "item-1",
@@ -1431,6 +1441,546 @@ class TestWiShow:
         mock_fetch.assert_not_awaited()
         printed = " ".join(str(c.args[0]) for c in mock_console.print.call_args_list)
         assert "failed to load" not in printed
+
+
+class TestWiBlockRelations:
+    """Tests for wi update/create --blocked-by/--unblocked-by and show relations."""
+
+    def _target(self):
+        return {
+            "id": "item-1",
+            "project": "p1",
+            "name": "Fix bug",
+            "sequence_id": 7,
+            "priority": "medium",
+        }
+
+    def _blocker(self, blocker_id="blocker-1"):
+        return {"id": blocker_id, "project": "p1", "name": "Blocker", "sequence_id": 1}
+
+    def _updated_mock(self):
+        updated = MagicMock()
+        updated.model_dump.return_value = {
+            "id": "item-1",
+            "name": "Fix bug",
+            "sequence_id": 7,
+            "priority": "medium",
+        }
+        return updated
+
+    @patch("planecli.cache.invalidate_resource", new_callable=AsyncMock)
+    @patch("planecli.cache.cached_get_relations", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.output_single")
+    @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.get_workspace", return_value="ws")
+    @patch("planecli.commands.work_items.get_client")
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
+    async def test_update_blocked_by_adds_relation(
+        self,
+        mock_resolve,
+        mock_get_client,
+        mock_ws,
+        mock_run_sdk,
+        mock_out,
+        mock_relations,
+        mock_invalidate,
+    ):
+        from planecli.commands.work_items import update
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_resolve.side_effect = [
+            (self._target(), "p1"),  # the issue itself
+            (self._blocker(), "p1"),  # the --blocked-by reference
+        ]
+        mock_run_sdk.side_effect = [self._updated_mock(), None]
+        mock_relations.side_effect = [
+            {"blocked_by": [], "blocking": []},
+            {"blocked_by": ["blocker-1"], "blocking": []},
+        ]
+
+        await update("ABC-7", blocked_by=["ABC-1"])
+
+        create_fn = mock_client.work_items.relations.create
+        relation_calls = [
+            c for c in mock_run_sdk.call_args_list if c[0][0] is create_fn
+        ]
+        assert len(relation_calls) == 1
+        payload = relation_calls[0][0][4]
+        assert payload.relation_type == "blocked_by"
+        assert payload.issues == ["blocker-1"]
+        # write verified by re-read + relations cache invalidated
+        assert mock_relations.await_count == 2
+        assert ("relations", "ws", "p1", "item-1") in [
+            tuple(c.args) for c in mock_invalidate.call_args_list
+        ]
+
+    @patch("planecli.cache.invalidate_resource", new_callable=AsyncMock)
+    @patch("planecli.cache.cached_get_relations", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.output_single")
+    @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.get_workspace", return_value="ws")
+    @patch("planecli.commands.work_items.get_client")
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
+    async def test_update_blocked_by_idempotent_no_api_call(
+        self,
+        mock_resolve,
+        mock_get_client,
+        mock_ws,
+        mock_run_sdk,
+        mock_out,
+        mock_relations,
+        mock_invalidate,
+    ):
+        from planecli.commands.work_items import update
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_resolve.side_effect = [
+            (self._target(), "p1"),
+            (self._blocker(), "p1"),
+        ]
+        mock_run_sdk.side_effect = [self._updated_mock()]
+        mock_relations.return_value = {"blocked_by": ["blocker-1"], "blocking": []}
+
+        await update("ABC-7", blocked_by=["ABC-1"])
+
+        create_fn = mock_client.work_items.relations.create
+        assert not [
+            c for c in mock_run_sdk.call_args_list if c[0][0] is create_fn
+        ]
+        mock_relations.assert_awaited_once()  # no verify re-read needed
+
+    @patch("planecli.cache.invalidate_resource", new_callable=AsyncMock)
+    @patch("planecli.cache.cached_get_relations", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.output_single")
+    @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.get_workspace", return_value="ws")
+    @patch("planecli.commands.work_items.get_client")
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
+    async def test_update_unblocked_by_removes_relation(
+        self,
+        mock_resolve,
+        mock_get_client,
+        mock_ws,
+        mock_run_sdk,
+        mock_out,
+        mock_relations,
+        mock_invalidate,
+    ):
+        from planecli.commands.work_items import update
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_resolve.side_effect = [
+            (self._target(), "p1"),
+            (self._blocker(), "p1"),
+        ]
+        mock_run_sdk.side_effect = [self._updated_mock(), None]
+        mock_relations.side_effect = [
+            {"blocked_by": ["blocker-1"], "blocking": []},
+            {"blocked_by": [], "blocking": []},
+        ]
+
+        await update("ABC-7", unblocked_by=["ABC-1"])
+
+        delete_fn = mock_client.work_items.relations.delete
+        relation_calls = [
+            c for c in mock_run_sdk.call_args_list if c[0][0] is delete_fn
+        ]
+        assert len(relation_calls) == 1
+        assert relation_calls[0][0][4].related_issue == "blocker-1"
+
+    @patch("planecli.cache.invalidate_resource", new_callable=AsyncMock)
+    @patch("planecli.cache.cached_get_relations", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.output_single")
+    @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.get_workspace", return_value="ws")
+    @patch("planecli.commands.work_items.get_client")
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
+    async def test_update_unblocked_by_noop_when_unrelated(
+        self,
+        mock_resolve,
+        mock_get_client,
+        mock_ws,
+        mock_run_sdk,
+        mock_out,
+        mock_relations,
+        mock_invalidate,
+    ):
+        from planecli.commands.work_items import update
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_resolve.side_effect = [
+            (self._target(), "p1"),
+            (self._blocker(), "p1"),
+        ]
+        mock_run_sdk.side_effect = [self._updated_mock()]
+        mock_relations.return_value = {"blocked_by": [], "blocking": []}
+
+        await update("ABC-7", unblocked_by=["ABC-1"])
+
+        delete_fn = mock_client.work_items.relations.delete
+        assert not [
+            c for c in mock_run_sdk.call_args_list if c[0][0] is delete_fn
+        ]
+
+    @patch("planecli.commands.work_items.output_single")
+    @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.get_workspace", return_value="ws")
+    @patch("planecli.commands.work_items.get_client")
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
+    async def test_update_blocked_by_self_rejected(
+        self, mock_resolve, mock_get_client, mock_ws, mock_run_sdk, mock_out
+    ):
+        from planecli.commands.work_items import update
+        from planecli.exceptions import ValidationError
+
+        mock_get_client.return_value = MagicMock()
+        mock_resolve.side_effect = [
+            (self._target(), "p1"),
+            (self._target(), "p1"),  # blocker resolves to the issue itself
+        ]
+        mock_run_sdk.side_effect = [self._updated_mock()]
+
+        with pytest.raises(ValidationError):
+            await update("ABC-7", blocked_by=["ABC-7"])
+
+    @patch("planecli.commands.work_items.output_single")
+    @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.get_workspace", return_value="ws")
+    @patch("planecli.commands.work_items.get_client")
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
+    async def test_update_blocked_by_other_project_rejected(
+        self, mock_resolve, mock_get_client, mock_ws, mock_run_sdk, mock_out
+    ):
+        from planecli.commands.work_items import update
+        from planecli.exceptions import ValidationError
+
+        mock_get_client.return_value = MagicMock()
+        mock_resolve.side_effect = [
+            (self._target(), "p1"),
+            ({"id": "other-1", "project": "p2", "name": "Other"}, "p2"),
+        ]
+        mock_run_sdk.side_effect = [self._updated_mock()]
+
+        with pytest.raises(ValidationError):
+            await update("ABC-7", blocked_by=["XYZ-9"])
+
+    @patch("planecli.commands.work_items.output_single")
+    @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.get_workspace", return_value="ws")
+    @patch("planecli.commands.work_items.get_client")
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
+    async def test_update_blocked_by_both_flags_rejected(
+        self, mock_resolve, mock_get_client, mock_ws, mock_run_sdk, mock_out
+    ):
+        from planecli.commands.work_items import update
+        from planecli.exceptions import ValidationError
+
+        mock_get_client.return_value = MagicMock()
+        mock_resolve.side_effect = [
+            (self._target(), "p1"),
+            (self._blocker(), "p1"),
+            (self._blocker(), "p1"),
+        ]
+        mock_run_sdk.side_effect = [self._updated_mock()]
+
+        with pytest.raises(ValidationError):
+            await update("ABC-7", blocked_by=["ABC-1"], unblocked_by=["ABC-1"])
+
+    @patch("planecli.commands.work_items.output_single")
+    @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.get_workspace", return_value="ws")
+    @patch("planecli.commands.work_items.get_client")
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
+    async def test_update_blocked_by_empty_ref_rejected(
+        self, mock_resolve, mock_get_client, mock_ws, mock_run_sdk, mock_out
+    ):
+        from planecli.commands.work_items import update
+        from planecli.exceptions import ValidationError
+
+        mock_get_client.return_value = MagicMock()
+        mock_resolve.return_value = (self._target(), "p1")
+        mock_run_sdk.side_effect = [self._updated_mock()]
+
+        with pytest.raises(ValidationError):
+            await update("ABC-7", blocked_by=["  "])
+
+    @patch("planecli.cache.invalidate_resource", new_callable=AsyncMock)
+    @patch("planecli.cache.cached_get_relations", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.output_single")
+    @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.get_workspace", return_value="ws")
+    @patch("planecli.commands.work_items.get_client")
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
+    async def test_update_blocked_by_silent_api_noop_raises(
+        self,
+        mock_resolve,
+        mock_get_client,
+        mock_ws,
+        mock_run_sdk,
+        mock_out,
+        mock_relations,
+        mock_invalidate,
+    ):
+        from planecli.commands.work_items import update
+        from planecli.exceptions import APIError
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_resolve.side_effect = [
+            (self._target(), "p1"),
+            (self._blocker(), "p1"),
+        ]
+        mock_run_sdk.side_effect = [self._updated_mock(), None]
+        # the server answers 200 but never records the relation
+        mock_relations.side_effect = [
+            {"blocked_by": [], "blocking": []},
+            {"blocked_by": [], "blocking": []},
+        ]
+
+        with pytest.raises(APIError):
+            await update("ABC-7", blocked_by=["ABC-1"])
+
+    @patch("planecli.cache.invalidate_resource", new_callable=AsyncMock)
+    @patch("planecli.cache.cached_get_relations", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.output_single")
+    @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.get_workspace", return_value="ws")
+    @patch("planecli.commands.work_items.get_client")
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_async",
+        new_callable=AsyncMock,
+    )
+    @patch(
+        "planecli.commands.work_items._resolve_project_id_async",
+        new_callable=AsyncMock,
+    )
+    async def test_create_blocked_by_adds_relation(
+        self,
+        mock_project,
+        mock_resolve,
+        mock_get_client,
+        mock_ws,
+        mock_run_sdk,
+        mock_out,
+        mock_relations,
+        mock_invalidate,
+    ):
+        from planecli.commands.work_items import create
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_project.return_value = "p1"
+        mock_resolve.return_value = self._blocker()
+        created = MagicMock()
+        created.model_dump.return_value = {
+            "id": "item-9",
+            "name": "New",
+            "sequence_id": 9,
+            "priority": "medium",
+        }
+        mock_run_sdk.side_effect = [created, None]
+        mock_relations.side_effect = [
+            {"blocked_by": [], "blocking": []},
+            {"blocked_by": ["blocker-1"], "blocking": []},
+        ]
+
+        await create("New", project="Frontend", blocked_by=["ABC-1"])
+
+        create_fn = mock_client.work_items.relations.create
+        relation_calls = [
+            c for c in mock_run_sdk.call_args_list if c[0][0] is create_fn
+        ]
+        assert len(relation_calls) == 1
+        assert relation_calls[0][0][4].issues == ["blocker-1"]
+
+    @patch("planecli.commands.work_items.output_single")
+    @patch("planecli.commands.work_items.fetch_issue_relations", new_callable=AsyncMock)
+    @patch("planecli.commands.comments.fetch_issue_comments", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
+    @patch("planecli.commands.work_items.get_workspace", return_value="ws")
+    @patch("planecli.commands.work_items.get_client")
+    async def test_show_includes_relations_json(
+        self,
+        mock_client,
+        mock_ws,
+        mock_resolve,
+        mock_run_sdk,
+        mock_comments,
+        mock_fetch_relations,
+        mock_out,
+    ):
+        from planecli.commands.work_items import show
+
+        mock_resolve.return_value = (
+            {
+                "id": "item-1",
+                "project": "p1",
+                "name": "Fix bug",
+                "sequence_id": 7,
+                "priority": "medium",
+            },
+            "p1",
+        )
+        mock_run_sdk.return_value = {"estimate_point": None}
+        mock_comments.return_value = []
+        mock_fetch_relations.return_value = {
+            "blocked_by": [{"id": "b1", "identifier": "ABC-1", "name": "Blocker"}],
+            "blocking": [],
+        }
+
+        await show("ABC-7", json=True)
+
+        mock_fetch_relations.assert_awaited_once_with("ws", "p1", "item-1")
+        data = mock_out.call_args[0][0]
+        assert data["blocked_by"] == mock_fetch_relations.return_value["blocked_by"]
+        assert data["blocking"] == []
+
+    @patch("planecli.commands.work_items.output_single")
+    @patch("planecli.commands.work_items.fetch_issue_relations", new_callable=AsyncMock)
+    @patch("planecli.commands.comments.fetch_issue_comments", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
+    @patch("planecli.commands.work_items.get_workspace", return_value="ws")
+    @patch("planecli.commands.work_items.get_client")
+    async def test_show_relations_failure_degrades_to_null(
+        self,
+        mock_client,
+        mock_ws,
+        mock_resolve,
+        mock_run_sdk,
+        mock_comments,
+        mock_fetch_relations,
+        mock_out,
+    ):
+        from planecli.commands.work_items import show
+
+        mock_resolve.return_value = (
+            {
+                "id": "item-1",
+                "project": "p1",
+                "name": "Fix bug",
+                "sequence_id": 7,
+                "priority": "medium",
+            },
+            "p1",
+        )
+        mock_run_sdk.return_value = {"estimate_point": None}
+        mock_comments.return_value = []
+        mock_fetch_relations.side_effect = _make_http_error(503, "unavailable")
+
+        await show("ABC-7", json=True)  # must NOT raise
+
+        data = mock_out.call_args[0][0]
+        assert data["blocked_by"] is None
+        assert data["blocking"] is None
+
+    @patch("planecli.commands.work_items.output")
+    @patch("planecli.commands.work_items.output_single")
+    @patch("planecli.commands.work_items.fetch_issue_relations", new_callable=AsyncMock)
+    @patch("planecli.commands.comments.fetch_issue_comments", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
+    @patch("planecli.commands.work_items.get_workspace", return_value="ws")
+    @patch("planecli.commands.work_items.get_client")
+    async def test_show_renders_relations_sections(
+        self,
+        mock_client,
+        mock_ws,
+        mock_resolve,
+        mock_run_sdk,
+        mock_comments,
+        mock_fetch_relations,
+        mock_out_single,
+        mock_output,
+    ):
+        from planecli.commands.work_items import RELATION_COLUMNS, show
+
+        mock_resolve.return_value = (
+            {
+                "id": "item-1",
+                "project": "p1",
+                "name": "Fix bug",
+                "sequence_id": 7,
+                "priority": "medium",
+            },
+            "p1",
+        )
+        mock_run_sdk.return_value = {"estimate_point": None}
+        mock_comments.return_value = []
+        rows = [{"id": "b1", "identifier": "ABC-1", "name": "Blocker"}]
+        mock_fetch_relations.return_value = {"blocked_by": rows, "blocking": []}
+
+        await show("ABC-7")  # human mode
+
+        mock_output.assert_called_once()
+        args, kwargs = mock_output.call_args
+        assert args[0] == rows
+        assert args[1] == RELATION_COLUMNS
+        assert kwargs.get("title") == "Blocked by"
+
+    @patch("planecli.cache.cached_list_projects", new_callable=AsyncMock)
+    @patch("planecli.cache.cached_list_work_items", new_callable=AsyncMock)
+    @patch("planecli.cache.cached_get_relations", new_callable=AsyncMock)
+    async def test_fetch_relations_enriches_and_falls_back(
+        self, mock_rel, mock_items, mock_projects
+    ):
+        from planecli.commands.work_items import fetch_issue_relations
+
+        mock_rel.return_value = {
+            "blocked_by": ["b1", "ghost-uuid-123456"],
+            "blocking": [],
+        }
+        mock_items.return_value = [{"id": "b1", "name": "Blocker", "sequence_id": 3}]
+        mock_projects.return_value = [{"id": "p1", "identifier": "ABC"}]
+
+        result = await fetch_issue_relations("ws", "p1", "item-1")
+
+        assert result["blocked_by"] == [
+            {"id": "b1", "identifier": "ABC-3", "name": "Blocker"},
+            {"id": "ghost-uuid-123456", "identifier": None, "name": "ghost-uu"},
+        ]
+        assert result["blocking"] == []
 
 
 class TestValidateDate:
