@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Several workspaces: optional `[name]` sections in `~/.plane_api` (slug, and optionally their own API key and base URL), a global `--workspace`/`-w NAME` flag that selects a section or any slug for one command, and `planecli workspaces` to list them without secrets. The existing file format keeps working unchanged
 
 ## [0.5.2] - 2026-09-25
 
