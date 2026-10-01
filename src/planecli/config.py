@@ -108,8 +108,23 @@ def set_cli_workspace(name: str | None) -> None:
 
 
 def save_config(base_url: str, api_key: str, workspace: str) -> None:
-    """Save config to ~/.plane_api with restricted permissions."""
+    """Save config to ~/.plane_api with restricted permissions.
+
+    Only the top-level key=value lines are rewritten; any ``[name]``
+    workspace sections already in the file are preserved untouched.
+    """
+    kept_sections: list[str] = []
+    if CONFIG_FILE.exists():
+        in_section = False
+        for line in CONFIG_FILE.read_text().splitlines():
+            stripped = line.strip()
+            if stripped.startswith("[") and stripped.endswith("]"):
+                in_section = True
+            if in_section:
+                kept_sections.append(line)
     content = f"base_url={base_url}\napi_key={api_key}\nworkspace={workspace}\n"
+    if kept_sections:
+        content += "\n" + "\n".join(kept_sections) + "\n"
     CONFIG_FILE.write_text(content)
     CONFIG_FILE.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0o600
 

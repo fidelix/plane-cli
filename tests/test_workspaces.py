@@ -13,6 +13,7 @@ from planecli.config import (
     _read_config_file,
     list_workspaces,
     load_config,
+    save_config,
     set_cli_workspace,
 )
 
@@ -62,6 +63,19 @@ class TestProfiles:
             AK: SHARED,
             "workspace": "axioqa",
         }
+
+    def test_save_config_preserves_sections(self, config_file):
+        save_config("https://api.plane.so", SHARED, "renamed")
+        content = config_file.read_text()
+        # only the top-level values are rewritten
+        assert _read_config_file() == {
+            "base_url": "https://api.plane.so",
+            AK: SHARED,
+            "workspace": "renamed",
+        }
+        # the [name] sections survive a `planecli configure` rewrite
+        assert "[second]" in content and "workspace=second-slug" in content
+        assert "[self-hosted]" in content and f"{AK}={OWN}" in content
 
     def test_default_workspace(self, config_file):
         c = load_config()
