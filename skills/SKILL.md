@@ -1,6 +1,6 @@
 ---
 name: planecli
-description: "Manage Plane.so through the planecli CLI — work items, projects, cycles/sprints, modules, labels, states, documents, intake queue, comments, attachments. Use when the user mentions Plane, planecli, or a work-item identifier like ABC-123, or asks about tasks, sprints, or backlogs in a project where Plane is the tracker."
+description: "Manage Plane.so through the planecli CLI — work items, projects, cycles/sprints, modules, labels, states, documents, initiatives, releases, intake queue, comments, attachments. Use when the user mentions Plane, planecli, or a work-item identifier like ABC-123, or asks about tasks, sprints, or backlogs in a project where Plane is the tracker."
 allowed-tools: Bash(planecli *)
 metadata:
   author: Patrick Alves
@@ -104,7 +104,7 @@ planecli intake decline <issue_id> -p "Project" --json
 planecli intake delete <issue_id> -p "Project"
 ```
 
-### Modules, Labels, States, Documents, Comments, Attachments
+### Modules, Labels, States, Documents, Comments, Attachments, Initiatives, Releases
 
 ```bash
 # Modules (--status: backlog, planned, in-progress, paused, completed, cancelled)
@@ -131,6 +131,14 @@ planecli comment create ABC-123 --body "Fixed in PR #456" --json
 # Attachments (wi create/update also take repeatable -i/--image PATH to embed images)
 planecli attachment attach ABC-123 -f ./spec.pdf --json
 planecli attachment ls ABC-123 --json
+
+# Initiatives (workspace-scoped, no -p)
+planecli initiative ls --json
+planecli initiative create "Q1 Launch" --state active --lead me --start-date 2026-10-01 --end-date 2026-12-31 --json
+
+# Releases (-p for project scope, omit for workspace-level releases)
+planecli release ls -p "Project" --json
+planecli release create "v2.4.0" -p "Project" --status unreleased --target-date 2026-12-31 --json
 ```
 
 ## Gotchas

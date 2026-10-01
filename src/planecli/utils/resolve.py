@@ -633,3 +633,65 @@ async def resolve_label_async(
         return match.item
 
     raise ResourceNotFoundError("Label", name)
+
+
+async def resolve_initiative_async(
+    query: str, client: PlaneClient, workspace: str
+) -> dict[str, Any]:
+    """Resolve an initiative by UUID or fuzzy name match.
+
+    The client argument is unused (raw HTTP path — the SDK initiative
+    models are not JSON-serializable); it keeps the resolver signature
+    uniform with the other resources.
+    """
+    from planecli.api.raw import api_get, initiative_base
+
+    _ = client
+    if _is_uuid(query):
+        return await api_get(
+            f"{initiative_base(workspace)}/{query}/",
+            action="fetch initiative",
+            resource="Initiative",
+            ref=query,
+        )
+
+    from planecli.cache import cached_list_initiatives
+
+    initiatives = await cached_list_initiatives(workspace)
+
+    match = find_best_match(query, initiatives, key=lambda i: i.get("name", ""))
+    if match:
+        return match.item
+
+    raise ResourceNotFoundError("Initiative", query)
+
+
+async def resolve_release_async(
+    query: str, client: PlaneClient, workspace: str, project_id: str | None
+) -> dict[str, Any]:
+    """Resolve a release by UUID or fuzzy name match within a scope.
+
+    The client argument is unused (raw HTTP path — the SDK has no release
+    resource); it keeps the resolver signature uniform. project_id None
+    scopes to workspace-level releases; otherwise to that project's.
+    """
+    from planecli.api.raw import api_get, release_base
+
+    _ = client
+    if _is_uuid(query):
+        return await api_get(
+            f"{release_base(workspace, project_id)}/{query}/",
+            action="fetch release",
+            resource="Release",
+            ref=query,
+        )
+
+    from planecli.cache import cached_list_releases
+
+    releases = await cached_list_releases(workspace, project_id)
+
+    match = find_best_match(query, releases, key=lambda r: r.get("name", ""))
+    if match:
+        return match.item
+
+    raise ResourceNotFoundError("Release", query)

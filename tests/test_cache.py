@@ -12,10 +12,12 @@ from planecli.cache import (
     cached_get_relations,
     cached_list_comments,
     cached_list_cycles,
+    cached_list_initiatives,
     cached_list_labels,
     cached_list_members,
     cached_list_modules,
     cached_list_projects,
+    cached_list_releases,
     cached_list_states,
     cached_list_work_items,
     get_cache_dir,
@@ -280,6 +282,39 @@ async def test_cached_get_relations(mock_run_sdk, mock_create_client, mock_hash)
     result3 = await cached_get_relations("my-ws", "proj-1", "item-1")
     assert result3 == result
     assert mock_run_sdk.call_count == 2
+
+
+@patch("planecli.cache._url_hash", return_value="abc123")
+@patch("planecli.api.raw.get_all_pages", new_callable=AsyncMock)
+async def test_cached_list_initiatives(mock_pages, mock_hash):
+    mock_pages.return_value = [{"id": "i1", "name": "Q1 Launch"}]
+
+    result = await cached_list_initiatives("my-ws")
+    assert result[0]["name"] == "Q1 Launch"
+
+    # Second call should hit cache
+    result2 = await cached_list_initiatives("my-ws")
+    assert result2 == result
+    assert mock_pages.call_count == 1  # only called once
+
+
+@patch("planecli.cache._url_hash", return_value="abc123")
+@patch("planecli.api.raw.get_all_pages", new_callable=AsyncMock)
+async def test_cached_list_releases_scoped_keys(mock_pages, mock_hash):
+    mock_pages.return_value = [{"id": "r1", "name": "v1"}]
+
+    proj = await cached_list_releases("my-ws", "proj-1")
+    ws = await cached_list_releases("my-ws", None)
+    assert proj == ws == [{"id": "r1", "name": "v1"}]
+    # project and workspace scopes fetched separately (distinct keys)
+    assert mock_pages.call_count == 2
+
+    await invalidate_resource("releases", "my-ws", "proj-1")
+    await cached_list_releases("my-ws", "proj-1")
+    assert mock_pages.call_count == 3
+    # the workspace-scope entry survived the project invalidation
+    await cached_list_releases("my-ws", None)
+    assert mock_pages.call_count == 3
 
 
 # --- Tests for invalidation ---

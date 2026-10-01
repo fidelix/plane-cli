@@ -335,6 +335,45 @@ async def cached_list_cycles(workspace: str, project_id: str) -> list[dict[str, 
     return await _cached_list(key, TTL_MODERATE, _fetch)
 
 
+async def cached_list_initiatives(workspace: str) -> list[dict[str, Any]]:
+    """Fetch workspace initiatives with caching (TTL: 5m).
+
+    Raw HTTP: the SDK initiative models are not JSON-serializable
+    (InitiativeState enum), so the SDK list path is unusable (ADR-0003).
+    """
+    from planecli.api.raw import get_all_pages, initiative_base
+
+    key = _cache_key("initiatives", workspace)
+
+    async def _fetch() -> list[Any]:
+        return await get_all_pages(
+            initiative_base(workspace) + "/", action="list initiatives"
+        )
+
+    return await _cached_list(key, TTL_MODERATE, _fetch)
+
+
+async def cached_list_releases(
+    workspace: str, project_id: str | None = None
+) -> list[dict[str, Any]]:
+    """Fetch releases with caching (TTL: 5m).
+
+    Raw HTTP: the SDK has no release resource at all (ADR-0003). The cache
+    key differs by scope, so project and workspace-level releases never
+    collide: project_id None scopes to workspace-level releases only.
+    """
+    from planecli.api.raw import get_all_pages, release_base
+
+    key = _cache_key("releases", workspace, project_id)
+
+    async def _fetch() -> list[Any]:
+        return await get_all_pages(
+            release_base(workspace, project_id) + "/", action="list releases"
+        )
+
+    return await _cached_list(key, TTL_MODERATE, _fetch)
+
+
 # --- Invalidation ---
 
 

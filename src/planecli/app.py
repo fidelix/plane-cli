@@ -23,10 +23,12 @@ from planecli.commands.cache_cmd import cache_app  # noqa: E402
 from planecli.commands.comments import comment_app  # noqa: E402
 from planecli.commands.cycles import cycle_app  # noqa: E402
 from planecli.commands.documents import doc_app  # noqa: E402
+from planecli.commands.initiatives import initiative_app  # noqa: E402
 from planecli.commands.intake import intake_app  # noqa: E402
 from planecli.commands.labels import label_app  # noqa: E402
 from planecli.commands.modules import module_app  # noqa: E402
 from planecli.commands.projects import project_app  # noqa: E402
+from planecli.commands.releases import release_app  # noqa: E402
 from planecli.commands.states import state_app  # noqa: E402
 from planecli.commands.users import user_app  # noqa: E402
 from planecli.commands.work_items import wi_app  # noqa: E402
@@ -36,6 +38,8 @@ app.command(wi_app)
 app.command(attachment_app)
 app.command(comment_app)
 app.command(doc_app)
+app.command(initiative_app)
+app.command(release_app)
 app.command(intake_app)
 app.command(user_app)
 app.command(module_app)

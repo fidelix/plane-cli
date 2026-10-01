@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `initiative` command group (`ls`/`show`/`create`/`update`/`delete`, workspace-scoped): strategic initiatives with state (`draft`, `planned`, `active`, `completed`, `closed`), lead, and start/end dates. Raw HTTP — the SDK initiative models are not JSON-serializable
+- `release` command group (`ls`/`show`/`create`/`update`/`delete`): named versions with status (`unreleased`, `released`, `cancelled`), target/release dates, and lead. Project-scoped with `-p`, workspace-level without. Raw HTTP — the SDK has no release resource
 
 ## [0.6.0] - 2026-10-01
 

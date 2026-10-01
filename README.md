@@ -13,6 +13,8 @@ The main differentiator is **intelligent fuzzy search**: reference any resource 
 - **Labels**: Create and manage project labels with custom colors
 - **States**: Configure workflow states per project
 - **Documents**: Create, read, update, and delete project documents
+- **Initiatives**: Manage workspace strategic initiatives with states, leads, and dates
+- **Releases**: Manage named versions (project or workspace scope) with statuses and dates
 - **Attachments**: Upload file attachments to work items and embed images inline in descriptions
 - **Intake**: Manage a project's intake queue — list, create, triage (accept/decline), and delete items
 - **Comments**: Add, update, and delete comments on work items
@@ -271,6 +273,34 @@ planecli attachment attach ABC-123 -f ./spec.pdf --force
 `wi create` / `wi update` accept repeatable `-i/--image PATH` flags that upload the
 image as an attachment and append it to the work item's description HTML.
 
+### Initiatives
+
+```bash
+# Initiatives are workspace-scoped (no project flag)
+planecli initiative ls
+planecli initiative show "Q1 Launch"
+planecli initiative create "Q1 Launch" --state active --lead me --start-date 2026-10-01 --end-date 2026-12-31
+planecli initiative update "Q1 Launch" --state completed
+planecli initiative delete "Q1 Launch"
+```
+
+States: `draft`, `planned`, `active`, `completed`, `closed` (case-insensitive).
+
+### Releases
+
+```bash
+# Project releases take -p; without -p you get workspace-level releases only
+planecli release ls -p Frontend
+planecli release ls                        # workspace-level releases
+planecli release show "v2.4.0" -p Frontend
+planecli release create "v2.4.0" -p Frontend --status unreleased --target-date 2026-12-31
+planecli release update "v2.4.0" -p Frontend --status released --release-date 2026-10-01
+planecli release delete "v2.4.0" -p Frontend
+```
+
+Statuses: `unreleased`, `released`, `cancelled`. Names are unique within the
+workspace. Releases need a paid Plane plan (the API answers `402` otherwise).
+
 ### Comments
 
 ```bash
@@ -315,6 +345,8 @@ planecli --no-cache wi ls -p "Frontend"
 | `planecli project` | `projects` |
 | `planecli comment` | `comments` |
 | `planecli document` | `documents`, `doc`, `docs` |
+| `planecli initiative` | `initiatives` |
+| `planecli release` | `releases` |
 | `planecli attachment` | `attachments` |
 | Subcommand `attach` | `upload`, `new` |
 | `planecli users` | `user` |
@@ -484,12 +516,15 @@ src/planecli/
     api/
         client.py        # PlaneClient singleton wrapper
         async_sdk.py     # Async wrapper with rate limiter
+        raw.py           # Raw HTTP escape hatch (releases, initiatives)
     commands/
         attachments.py   # Attachment upload/list + inline description images
         cache_cmd.py     # Cache management
         comments.py      # Comment CRUD
         cycles.py        # Cycle CRUD + item management
         documents.py     # Document CRUD
+        initiatives.py   # Initiative CRUD (workspace scope, raw HTTP)
+        releases.py      # Release CRUD (project/workspace scope, raw HTTP)
         intake.py        # Intake queue (list/create/accept/decline/delete/enabled)
         labels.py        # Label CRUD
         modules.py       # Module CRUD

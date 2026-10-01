@@ -9,6 +9,8 @@
 - [Labels](#labels)
 - [States](#states)
 - [Documents](#documents)
+- [Initiatives](#initiatives)
+- [Releases](#releases)
 - [Comments](#comments)
 - [Attachments](#attachments)
 - [Intake](#intake)
@@ -297,6 +299,48 @@ planecli doc create --title TITLE --content CONTENT -p PROJECT
 planecli doc update TITLE --content CONTENT -p PROJECT
 planecli doc delete TITLE -p PROJECT
 ```
+
+## Initiatives
+
+Command group: `planecli initiative` (alias: `initiatives`). Workspace-scoped (no project flag).
+
+```
+planecli initiative ls [--sort created|updated] [--limit/-l N] [--json]
+planecli initiative show INITIATIVE [--json]
+planecli initiative create NAME [-d DESCRIPTION] [--state STATE] [--start-date DATE] [--end-date DATE] [--lead USER] [--json]
+planecli initiative update INITIATIVE [--name NAME] [-d DESCRIPTION] [--state STATE] [--start-date DATE] [--end-date DATE] [--lead USER] [--json]
+planecli initiative delete INITIATIVE
+```
+
+| Parameter | Description |
+|---|---|
+| `INITIATIVE` | Initiative name or UUID |
+| `--state` | `draft`, `planned`, `active`, `completed`, `closed` (case-insensitive) |
+| `--lead` | Lead name, email, or `me` |
+
+## Releases
+
+Command group: `planecli release` (alias: `releases`). Project-scoped with `-p PROJECT`,
+workspace-level without it — the two scopes never mix: without `-p` you only see
+workspace-level releases, and lookups (`show`/`update`/`delete`) search only the
+selected scope.
+
+```
+planecli release ls [-p PROJECT] [--sort created|updated] [--limit/-l N] [--json]
+planecli release show RELEASE [-p PROJECT] [--json]
+planecli release create NAME [-p PROJECT] [-d DESCRIPTION] [--status STATUS] [--target-date DATE] [--release-date DATE] [--lead USER] [--json]
+planecli release update RELEASE [-p PROJECT] [--name NAME] [-d DESCRIPTION] [--status STATUS] [--target-date DATE] [--release-date DATE] [--lead USER] [--json]
+planecli release delete RELEASE [-p PROJECT]
+```
+
+| Parameter | Description |
+|---|---|
+| `RELEASE` | Release name or UUID |
+| `--status` | `unreleased`, `released`, `cancelled` (case-insensitive) |
+| `--lead` | Lead name, email, or `me` |
+
+Names are unique within the workspace (a duplicate `create` fails with exit 5).
+Releases need a paid Plane plan — the API answers `402` on workspaces without it.
 
 ## Comments
 

@@ -41,6 +41,8 @@ Only **slowly-changing resource definitions** are cached. Data that changes freq
 | Work items | **2 min** | The work-item list per project | `wi list` and fuzzy name resolution |
 | Comments | **1 min** | A single work item's comments | `comment ls` and the comments bundled by `wi show` |
 | Relations | **1 min** | A single work item's relations | The relations bundled by `wi show` |
+| Initiatives | **5 min** | The workspace initiative list | Resolving initiative names, `initiative ls` |
+| Releases | **5 min** | The release list per scope (project releases and workspace-level releases cache separately) | Resolving release names, `release ls` |
 
 The TTLs follow a **volatility gradient** — the more often a resource changes, the shorter its lifetime. Comments and relations get the shortest TTL (1 min) because they are the most volatile, followed by work items (2 min); a short window still eliminates repeated calls when opening the same item several times in a row. The rationale for these tiers is recorded in [ADR-0004](adr/0004-disk-cache-ttls-and-keys.md).
 
@@ -87,6 +89,8 @@ Write commands automatically invalidate the relevant cache entry:
 | `intake create/accept/decline/delete` | Work item list for that project (an intake item wraps a work item) |
 | `comment create/update/delete` | Comments for that specific work item |
 | `wi update/create --blocked-by/--unblocked-by` | Relations for that specific work item |
+| `initiative create/update/delete` | Initiative list for the workspace |
+| `release create/update/delete` | Release list for that scope (project or workspace) |
 | `configure` | Entire cache (credentials may have changed) |
 
 Members are not mutated via the CLI, so they rely on TTL expiry only.
