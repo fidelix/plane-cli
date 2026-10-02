@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `wi update --module` adds the item to a module (same additive semantics as `wi create --module`)
 
 ## [0.7.0] - 2026-10-01
 

@@ -993,6 +993,7 @@ async def update(
     description: Annotated[str | None, Parameter(alias="-d")] = None,
     image: Annotated[list[str] | None, Parameter(alias="-i")] = None,
     force: bool = False,
+    module: str | None = None,
     start_date: str | None = None,
     target_date: str | None = None,
     blocked_by: list[str] | None = None,
@@ -1029,6 +1030,8 @@ async def update(
         --description if one is given.
     force
         Upload images even if an attachment with the same file name already exists.
+    module
+        Module name or UUID to add the item to.
     start_date
         New start date (YYYY-MM-DD).
     target_date
@@ -1166,6 +1169,14 @@ async def update(
                 blocked_by=blocked_by,
                 unblocked_by=unblocked_by,
                 project_flag=project,
+            )
+
+        # Add to module if specified (same additive semantics as create)
+        if module:
+            module_data = await resolve_module_async(module, client, workspace, project_id)
+            await run_sdk(
+                client.modules.add_work_items,
+                workspace, project_id, module_data["id"], [item_id],
             )
 
         # Invalidate work items cache for this project

@@ -1155,6 +1155,89 @@ class TestWiUpdate:
         update_data = call_args[0][4]
         assert update_data.estimate_point is None
 
+    @patch("planecli.commands.work_items.output_single")
+    @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.resolve_module_async", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.get_workspace", return_value="test-ws")
+    @patch("planecli.commands.work_items.get_client")
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
+    @patch("planecli.cache.invalidate_resource", new_callable=AsyncMock)
+    async def test_update_with_module_adds_to_module(
+        self,
+        mock_invalidate,
+        mock_resolve_wi,
+        mock_get_client,
+        mock_get_ws,
+        mock_resolve_module,
+        mock_run_sdk,
+        mock_output,
+    ):
+        """--module should resolve the module and add the item to it."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_resolve_wi.return_value = ({"id": "wi-1", "name": "Test"}, "proj-1")
+        mock_resolve_module.return_value = {"id": "mod-1", "name": "Auth"}
+
+        mock_updated = MagicMock()
+        mock_updated.model_dump.return_value = {
+            "id": "wi-1",
+            "name": "Test",
+            "sequence_id": 1,
+            "priority": "medium",
+        }
+        mock_run_sdk.return_value = mock_updated
+
+        await update("WI-1", module="Auth")
+
+        mock_resolve_module.assert_called_once_with(
+            "Auth", mock_client, "test-ws", "proj-1"
+        )
+        add_fn = mock_client.modules.add_work_items
+        add_calls = [c for c in mock_run_sdk.call_args_list if c[0][0] is add_fn]
+        assert len(add_calls) == 1
+        assert add_calls[0][0][1:4] == ("test-ws", "proj-1", "mod-1")
+        assert add_calls[0][0][4] == ["wi-1"]
+
+    @patch("planecli.commands.work_items.output_single")
+    @patch("planecli.commands.work_items.run_sdk", new_callable=AsyncMock)
+    @patch("planecli.commands.work_items.get_workspace", return_value="test-ws")
+    @patch("planecli.commands.work_items.get_client")
+    @patch(
+        "planecli.commands.work_items.resolve_work_item_across_projects_async",
+        new_callable=AsyncMock,
+    )
+    @patch("planecli.cache.invalidate_resource", new_callable=AsyncMock)
+    async def test_update_without_module_no_add_call(
+        self,
+        mock_invalidate,
+        mock_resolve_wi,
+        mock_get_client,
+        mock_get_ws,
+        mock_run_sdk,
+        mock_output,
+    ):
+        """Omitting --module must not touch module membership."""
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_resolve_wi.return_value = ({"id": "wi-1", "name": "Test"}, "proj-1")
+
+        mock_updated = MagicMock()
+        mock_updated.model_dump.return_value = {
+            "id": "wi-1",
+            "name": "Test",
+            "sequence_id": 1,
+            "priority": "medium",
+        }
+        mock_run_sdk.return_value = mock_updated
+
+        await update("WI-1", name="New title")
+
+        add_fn = mock_client.modules.add_work_items
+        assert not [c for c in mock_run_sdk.call_args_list if c[0][0] is add_fn]
+
 
 class TestWiFields:
     """Tests for display field configuration."""

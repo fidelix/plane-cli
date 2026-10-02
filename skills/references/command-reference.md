@@ -139,6 +139,7 @@ planecli wi update ISSUE [OPTIONS]
 | `--description` / `-d` | New description. Stored as raw HTML, not markdown |
 | `--image` / `-i` | Image file path to embed in the description (repeatable); appended to the existing description |
 | `--force` | Upload images even when an attachment with the same file name exists |
+| `--module` | Module name or UUID to add the item to |
 | `--blocked-by` | Work item that now blocks this one, by identifier, UUID, or name (repeatable; additive only) |
 | `--unblocked-by` | Work item that no longer blocks this one (repeatable; removes the relation, no prompt) |
 | `--start-date` | New start date (YYYY-MM-DD) |
