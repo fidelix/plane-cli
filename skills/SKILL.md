@@ -59,7 +59,7 @@ planecli wi show ABC-123 --json                     # bundles comments + relatio
 planecli wi show ABC-123 --no-comments --no-relations --json
 planecli wi assign ABC-123 --json                   # assign to yourself
 planecli wi assign ABC-123 --assign "Name" --json
-planecli wi search "login bug" -p "Project" --json
+planecli wi search "login bug" --json             # whole workspace; add -p to narrow
 planecli wi delete ABC-123
 ```
 

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `wi search` returns results again. The command read `results` from a payload whose key is `issues`, and the legacy `work-items/search/` endpoint answers an empty list for every query on current Plane servers. Search now uses `advanced-search` (see [ADR-0009](docs/adr/0009-work-item-search-uses-advanced-search.md)), applies `-p/--project` server-side (name, identifier, or UUID; whole workspace when omitted), and honours `--limit`. `--sort updated` now fails with a clear validation error instead of being silently ignored
+
 ### Added
 
 ## [0.8.0] - 2026-10-02

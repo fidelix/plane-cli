@@ -2084,3 +2084,161 @@ class TestValidateDate:
 
         with pytest.raises(ValidationError):
             _validate_date(bad, "--start-date")
+
+
+def _make_search_hit(
+    item_id: str,
+    name: str,
+    sequence_id: int,
+    project_id: str = "proj-1",
+    project_identifier: str = "ENG",
+    state_id: str | None = "state-1",
+    priority: str = "medium",
+) -> dict:
+    """Return an advanced-search hit (how the endpoint returns it)."""
+    return {
+        "id": item_id,
+        "name": name,
+        "sequence_id": sequence_id,
+        "project_identifier": project_identifier,
+        "project_id": project_id,
+        "workspace_id": "ws-uuid-1",
+        "type_id": "type-1",
+        "state_id": state_id,
+        "priority": priority,
+        "target_date": None,
+        "start_date": None,
+    }
+
+
+class TestWiSearch:
+    """Tests for the wi search command.
+
+    The legacy `work-items/search/` endpoint answers `{"issues": []}` for every
+    query (see ADR-0009), and the command also read the wrong response key, so
+    search never showed anything. Search now goes through the advanced-search
+    endpoint and honours --project server-side.
+    """
+
+    @patch("planecli.commands.work_items.output")
+    @patch("planecli.commands.work_items.get_workspace", return_value="test-ws")
+    @patch("planecli.commands.work_items.get_client")
+    @patch("planecli.commands.work_items.resolve_project_async")
+    @patch("planecli.cache.cached_list_states", new_callable=AsyncMock)
+    async def test_search_returns_advanced_search_hits(
+        self,
+        mock_states,
+        mock_resolve_project,
+        mock_get_client,
+        mock_get_ws,
+        mock_output,
+    ):
+        from planecli.commands.work_items import search
+
+        client = MagicMock()
+        mock_get_client.return_value = client
+        client.work_items.advanced_search.return_value = [
+            _make_search_hit("wi-1", "Fix the site purge", 12),
+        ]
+        mock_resolve_project.return_value = _make_project_dict("proj-1", "ENG", "Engineering")
+        mock_states.return_value = [_make_state_dict("state-1", "In Progress")]
+
+        await search("site", project="ENG", json=True)
+
+        data = mock_output.call_args[0][0]
+        assert len(data) == 1
+        assert data[0]["name"] == "Fix the site purge"
+        assert data[0]["sequence_id"] == "ENG-12"
+        assert data[0]["state_detail_name"] == "In Progress"
+        assert data[0]["project_identifier"] == "ENG"
+
+        # The dead legacy endpoint must not be used.
+        assert not client.work_items.search.called
+
+        # --project is resolved and sent to the API as a filter.
+        request = client.work_items.advanced_search.call_args[0][1]
+        assert request.query == "site"
+        assert request.filters == {"and": [{"project_id": "proj-1"}]}
+        assert request.limit == 20
+
+    @patch("planecli.commands.work_items.output")
+    @patch("planecli.commands.work_items.get_workspace", return_value="test-ws")
+    @patch("planecli.commands.work_items.get_client")
+    @patch("planecli.commands.work_items.resolve_project_async")
+    @patch("planecli.cache.cached_list_states", new_callable=AsyncMock)
+    async def test_search_without_project_searches_whole_workspace(
+        self,
+        mock_states,
+        mock_resolve_project,
+        mock_get_client,
+        mock_get_ws,
+        mock_output,
+    ):
+        from planecli.commands.work_items import search
+
+        client = MagicMock()
+        mock_get_client.return_value = client
+        client.work_items.advanced_search.return_value = [
+            _make_search_hit("wi-1", "Site A", 1),
+            _make_search_hit(
+                "wi-2", "Site B", 2, project_id="proj-2", project_identifier="OPS"
+            ),
+        ]
+        mock_states.return_value = []
+
+        await search("site", json=True)
+
+        assert mock_resolve_project.called is False
+        request = client.work_items.advanced_search.call_args[0][1]
+        assert request.filters is None
+
+        data = mock_output.call_args[0][0]
+        assert [row["sequence_id"] for row in data] == ["ENG-1", "OPS-2"]
+
+    @patch("planecli.commands.work_items.output")
+    @patch("planecli.commands.work_items.get_workspace", return_value="test-ws")
+    @patch("planecli.commands.work_items.get_client")
+    @patch("planecli.cache.cached_list_states", new_callable=AsyncMock)
+    async def test_state_enrichment_failure_degrades_to_blank(
+        self,
+        mock_states,
+        mock_get_client,
+        mock_get_ws,
+        mock_output,
+    ):
+        """A failed secondary fetch must not hide the search results (ADR-0006)."""
+        from planecli.commands.work_items import search
+
+        client = MagicMock()
+        mock_get_client.return_value = client
+        client.work_items.advanced_search.return_value = [
+            _make_search_hit("wi-1", "Fix the site purge", 12),
+        ]
+        mock_states.side_effect = _make_http_error(500)
+
+        await search("site", json=True)
+
+        data = mock_output.call_args[0][0]
+        assert len(data) == 1
+        assert data[0]["sequence_id"] == "ENG-12"
+        assert data[0]["state_detail_name"] == ""
+
+    @patch("planecli.commands.work_items.get_client")
+    async def test_search_rejects_updated_sort(self, mock_get_client):
+        from planecli.commands.work_items import search
+        from planecli.exceptions import ValidationError
+
+        with pytest.raises(ValidationError):
+            await search("site", sort="updated")
+
+        assert not mock_get_client.return_value.work_items.advanced_search.called
+
+    @patch("planecli.commands.work_items.get_client")
+    async def test_search_rejects_non_positive_limit(self, mock_get_client):
+        from planecli.commands.work_items import search
+        from planecli.exceptions import ValidationError
+
+        with pytest.raises(ValidationError):
+            await search("site", limit=0)
+
+        assert not mock_get_client.return_value.work_items.advanced_search.called

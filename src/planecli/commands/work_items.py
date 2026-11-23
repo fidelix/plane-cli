@@ -1233,6 +1233,15 @@ async def delete(
     console.print(f"[green]Work item '{item_name}' deleted.[/]")
 
 
+SEARCH_COLUMNS = [
+    ("sequence_id", "ID"),
+    ("name", "Title"),
+    ("priority", "Priority"),
+    ("state_detail_name", "State"),
+    ("project_identifier", "Project"),
+]
+
+
 @wi_app.command
 async def search(
     query: str,
@@ -1242,39 +1251,116 @@ async def search(
     limit: Annotated[int, Parameter(alias="-l")] = 20,
     json: bool = False,
 ) -> None:
-    """Search work items by text.
+    """Search work items by text across the workspace.
+
+    Matches titles (and indexed description text), newest first. The search
+    endpoint returns identifiers, titles, priorities, state UUIDs, and the
+    project identifier — not full work item records — so dates, assignees,
+    and labels are not part of search output. Use `wi show` on a hit for the
+    full record.
 
     Parameters
     ----------
     query
         Search query string.
     project
-        Limit search to a specific project.
+        Limit search to a specific project (name, identifier, or UUID). If
+        omitted, searches every project in the workspace.
     sort
-        Sort by: created (default), updated.
+        Sort by: created (default). The search endpoint always returns
+        newest-first and exposes no timestamps, so 'updated' is rejected
+        instead of being silently ignored.
     limit
-        Maximum results to show.
+        Maximum results to show (the API answers relevance-ranked, newest
+        first).
     """
+    from plane.models.work_items import AdvancedSearchWorkItem
+
+    from planecli.cache import cached_list_states
+    from planecli.exceptions import ValidationError
+
+    if sort != "created":
+        raise ValidationError(
+            f"wi search cannot sort by {sort!r}: the search API returns newest-first "
+            "and carries no created/updated timestamps.",
+            hint="Use `wi search` to find the item, then `wi show` or a `wi list --sort "
+            "updated` view for time-ordered results.",
+        )
+    if limit < 1:
+        raise ValidationError(
+            f"Invalid limit: {limit} (must be at least 1).",
+            hint="Use --limit N with N >= 1.",
+        )
+
     try:
         client = get_client()
         workspace = get_workspace()
 
-        result = await run_sdk(client.work_items.search, workspace, query)
-        results_data = result.model_dump() if hasattr(result, "model_dump") else result
+        project_id = None
+        if project:
+            resolved = await resolve_project_async(project, client, workspace)
+            project_id = resolved["id"]
 
-        # Extract work items from search results
-        items = []
-        if isinstance(results_data, dict):
-            items = results_data.get("results", [])
-        elif isinstance(results_data, list):
-            items = results_data
+        # NOTE: The legacy `work-items/search/` endpoint answers
+        # `{"issues": []}` for every query on current Plane servers, and the
+        # SDK model for it exposes `issues`, not `results` (ADR-0009). The
+        # advanced-search endpoint is the supported one and is the only place
+        # the project filter can be applied server-side.
+        hits = await run_sdk(
+            client.work_items.advanced_search,
+            workspace,
+            AdvancedSearchWorkItem(
+                query=query,
+                filters={"and": [{"project_id": project_id}]} if project_id else None,
+                limit=limit,
+            ),
+        )
+        hits = [hit.model_dump() if hasattr(hit, "model_dump") else hit for hit in hits]
 
-        data = [_enrich_work_item(i if isinstance(i, dict) else i.model_dump()) for i in items]
+        # Search hits carry only state UUIDs. State names are secondary
+        # enrichment: a failed states fetch must not hide the results (ADR-0006).
+        state_maps: dict[str, dict[str, dict]] = {}
+        project_ids = sorted({hit.get("project_id") for hit in hits if hit.get("project_id")})
+        if project_ids:
+            states_per_project = await asyncio.gather(
+                *[cached_list_states(workspace, pid) for pid in project_ids],
+                return_exceptions=True,
+            )
+            for pid, states in zip(project_ids, states_per_project):
+                if isinstance(states, BaseException):
+                    state_maps[pid] = {}
+                    continue
+                state_maps[pid] = {
+                    s["id"]: {
+                        "name": s.get("name"),
+                        "color": s.get("color"),
+                        "group": s.get("group"),
+                    }
+                    for s in states
+                    if s.get("id") and s.get("name")
+                }
+
+        data = []
+        for hit in hits:
+            row = dict(hit)
+            state_map = state_maps.get(row.get("project_id")) or {}
+            # _enrich_work_item resolves state names from the "state" key. Only
+            # pass it when the UUID is known, so an unavailable states list
+            # leaves the column blank instead of leaking a raw UUID (ADR-0006).
+            state_id = row.get("state_id")
+            if state_id and state_id in state_map:
+                row["state"] = state_id
+            data.append(
+                _enrich_work_item(
+                    row,
+                    state_map=state_map,
+                    project_identifier=row.get("project_identifier"),
+                )
+            )
     except PlaneError as e:
         raise handle_api_error(e)
 
-    data = data[:limit]
-    output(data, WI_COLUMNS, title=f"Search Results: '{query}'", as_json=json)
+    output(data, SEARCH_COLUMNS, title=f"Search Results: '{query}'", as_json=json)
 
 
 @wi_app.command

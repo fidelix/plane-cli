@@ -166,10 +166,13 @@ planecli wi search QUERY [OPTIONS]
 | Parameter | Description |
 |---|---|
 | `QUERY` | Search text (required) |
-| `--project` / `-p` | Project (required) |
-| `--sort` | Sort by: `created` (default), `updated` |
-| `--limit` / `-l` | Max results (default: 50) |
+| `--project` / `-p` | Limit to one project (name, identifier, or UUID). Omit to search the whole workspace |
+| `--sort` | Sort by: `created` (default, newest first). `updated` is rejected — the search API returns no timestamps |
+| `--limit` / `-l` | Max results (default: 20) |
 | `--json` | JSON output |
+
+Results show ID, title, priority, state, and project. The search API does not return dates,
+assignees, or labels; use `planecli wi show ID` for the full record.
 
 ### wi assign
 
