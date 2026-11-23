@@ -117,7 +117,7 @@ planecli wi update ABC-123 -i ./diagram.png --force
 planecli wi assign ABC-123
 planecli wi assign ABC-123 --assign "Patrick"
 
-# Search work items
+# Search work items (omit -p to search the whole workspace)
 planecli wi search "login bug" -p "Frontend"
 
 # Delete a work item
