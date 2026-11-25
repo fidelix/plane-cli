@@ -248,8 +248,10 @@ async def fetch_issue_relations(
     """Fetch and enrich a work item's blocked_by/blocking relations.
 
     Single source of truth shared by `wi show` (and the relation write
-    path for display labels). Related UUIDs resolve to identifier/name via
-    the (already 2m-cached) project work items list.
+    path for display labels). Each related UUID resolves to identifier/name
+    by a direct (2m-cached) lookup of that one item, never by listing the
+    project: on a project with a thousand items the list made every
+    `wi show` page through all of them, often past a minute.
 
     Returns {"blocked_by": [...], "blocking": [...]} where each entry is
     {"id", "identifier" (or None), "name"}. Unknown UUIDs degrade to a
@@ -261,24 +263,35 @@ async def fetch_issue_relations(
 
     from planecli.cache import (
         cached_get_relations,
+        cached_get_work_item,
         cached_list_projects,
-        cached_list_work_items,
     )
     from planecli.exceptions import PlaneCLIError
 
     relations = await cached_get_relations(workspace, project_id, item_id)
+    related_ids = list(
+        dict.fromkeys([*(relations.get("blocked_by") or []), *(relations.get("blocking") or [])])
+    )
+    if not related_ids:
+        return {"blocked_by": [], "blocking": []}
 
-    # Name resolution is a nicety, not the point of this call: if the
-    # project lists fail to load, fall back to empty maps (entries then
-    # degrade to truncated UUIDs) instead of losing the relations.
-    try:
-        items, projects = await asyncio.gather(
-            cached_list_work_items(workspace, project_id),
-            cached_list_projects(workspace),
-        )
-    except (PlaneError, PlaneCLIError):
-        items, projects = [], []
-    item_map = {i["id"]: i for i in items if i.get("id")}
+    # Name resolution is a nicety, not the point of this call: an item or
+    # project list that fails to load (other project, deleted, API error)
+    # degrades to a truncated UUID instead of losing the relations.
+    async def _lookup(uid: str) -> dict:
+        try:
+            return await cached_get_work_item(workspace, project_id, uid)
+        except (PlaneError, PlaneCLIError):
+            return {}
+
+    async def _projects() -> list[dict]:
+        try:
+            return await cached_list_projects(workspace)
+        except (PlaneError, PlaneCLIError):
+            return []
+
+    projects, *found = await asyncio.gather(_projects(), *(_lookup(uid) for uid in related_ids))
+    item_map = dict(zip(related_ids, found, strict=True))
     project_identifier = next(
         (p.get("identifier", "") for p in projects if p.get("id") == project_id),
         "",

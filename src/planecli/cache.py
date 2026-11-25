@@ -294,6 +294,40 @@ async def cached_get_relations(
     return data
 
 
+async def cached_get_work_item(
+    workspace: str, project_id: str, item_id: str
+) -> dict[str, Any]:
+    """Fetch one work item by UUID with short-lived caching (TTL: 2m).
+
+    Lets callers name a few related items without listing the whole project.
+    Returns the raw detail dict (ADR-0003: bypasses WorkItemDetail validation).
+    """
+    from planecli.api.async_sdk import create_client, run_sdk
+
+    key = _cache_key("work_item", workspace, project_id, item_id=item_id)
+
+    if not _no_cache:
+        try:
+            cached = await cache.get(key)
+            if cached is not None:
+                return cached
+        except Exception as exc:
+            logger.warning("Cache read error, fetching from API: {}", exc)
+
+    client = create_client()
+    # NOTE: raw _get() — WorkItemDetail validation fails on UUID assignees/labels.
+    data = await run_sdk(
+        client.work_items._get, f"{workspace}/projects/{project_id}/work-items/{item_id}"
+    )
+
+    try:
+        await cache.set(key, data, expire=TTL_WORK_ITEMS)
+    except Exception as exc:
+        logger.warning("Cache write error: {}", exc)
+
+    return data
+
+
 async def cached_get_me(workspace: str) -> dict[str, Any]:
     """Cache the current user (TTL: 1h)."""
     from planecli.api.async_sdk import create_client, run_sdk

@@ -2044,17 +2044,26 @@ class TestWiBlockRelations:
 
     @patch("planecli.cache.cached_list_projects", new_callable=AsyncMock)
     @patch("planecli.cache.cached_list_work_items", new_callable=AsyncMock)
+    @patch("planecli.cache.cached_get_work_item", new_callable=AsyncMock)
     @patch("planecli.cache.cached_get_relations", new_callable=AsyncMock)
     async def test_fetch_relations_enriches_and_falls_back(
-        self, mock_rel, mock_items, mock_projects
+        self, mock_rel, mock_item, mock_items, mock_projects
     ):
+        from plane.errors import HttpError
+
         from planecli.commands.work_items import fetch_issue_relations
 
         mock_rel.return_value = {
             "blocked_by": ["b1", "ghost-uuid-123456"],
-            "blocking": [],
+            "blocking": ["b1"],
         }
-        mock_items.return_value = [{"id": "b1", "name": "Blocker", "sequence_id": 3}]
+
+        async def _item(_ws, _project, uid):
+            if uid == "b1":
+                return {"id": "b1", "name": "Blocker", "sequence_id": 3}
+            raise HttpError("not found", status_code=404)
+
+        mock_item.side_effect = _item
         mock_projects.return_value = [{"id": "p1", "identifier": "ABC"}]
 
         result = await fetch_issue_relations("ws", "p1", "item-1")
@@ -2063,7 +2072,28 @@ class TestWiBlockRelations:
             {"id": "b1", "identifier": "ABC-3", "name": "Blocker"},
             {"id": "ghost-uuid-123456", "identifier": None, "name": "ghost-uu"},
         ]
-        assert result["blocking"] == []
+        assert result["blocking"] == [{"id": "b1", "identifier": "ABC-3", "name": "Blocker"}]
+        # Names come from one lookup per related item, never from the project list.
+        assert sorted(c.args[2] for c in mock_item.await_args_list) == ["b1", "ghost-uuid-123456"]
+        mock_items.assert_not_awaited()
+
+    @patch("planecli.cache.cached_list_projects", new_callable=AsyncMock)
+    @patch("planecli.cache.cached_list_work_items", new_callable=AsyncMock)
+    @patch("planecli.cache.cached_get_work_item", new_callable=AsyncMock)
+    @patch("planecli.cache.cached_get_relations", new_callable=AsyncMock)
+    async def test_fetch_relations_without_relations_makes_no_lookup(
+        self, mock_rel, mock_item, mock_items, mock_projects
+    ):
+        from planecli.commands.work_items import fetch_issue_relations
+
+        mock_rel.return_value = {"blocked_by": [], "blocking": None}
+
+        result = await fetch_issue_relations("ws", "p1", "item-1")
+
+        assert result == {"blocked_by": [], "blocking": []}
+        mock_item.assert_not_awaited()
+        mock_items.assert_not_awaited()
+        mock_projects.assert_not_awaited()
 
 
 class TestValidateDate:
