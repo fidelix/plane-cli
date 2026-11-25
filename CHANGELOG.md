@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-11-25
+
 ### Fixed
 - `wi show` no longer pages through every work item in the project to name its blocked-by/blocking relations. On a project with ~1,100 items that scan made every `wi show` take over a minute (and look hung). Each related item is now looked up directly by UUID (cached 2m), and an item with no relations makes no lookup at all
 
